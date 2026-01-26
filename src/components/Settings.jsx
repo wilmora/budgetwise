@@ -1,70 +1,110 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
+import { ChevronRight, Upload, Download, Trash2, Moon, Sun, Bell, Wrench, BookOpen, RotateCcw, Smartphone, Info } from 'lucide-react';
 import { getTransactions, saveTransactions, clearAllData, getSettings, saveSettings } from '../utils/storage';
 import { parseCSV, downloadCSV } from '../utils/csvHandler';
 import { suggestCategory } from '../utils/aiCategorizer';
+import { SUPPORTED_CURRENCIES, getUserCurrency, setUserCurrency } from '../utils/currency';
+import { requestNotificationPermission, areNotificationsEnabled, scheduleDailyReminder, cancelAllReminders } from '../utils/notifications';
+import { isDiagnosticsEnabled, setDiagnosticsEnabled as setDiagEnabled, logEvent, EVENTS } from '../utils/diagnostics';
 
 export default function Settings({ onUpdate, theme, onToggleTheme, onResetOnboarding, onReopenTutorial }) {
     const [settings, setSettings] = useState(() => getSettings());
+    const [currentCurrency, setCurrentCurrency] = useState(() => getUserCurrency());
     const [importStatus, setImportStatus] = useState(null);
     const [showClearConfirm, setShowClearConfirm] = useState(false);
     const [showImportType, setShowImportType] = useState(false);
     const [pendingFile, setPendingFile] = useState(null);
     const fileInputRef = useRef(null);
 
+    const [remindersEnabled, setRemindersEnabled] = useState(() => {
+        const stored = localStorage.getItem('budgetwise-reminders');
+        return stored ? JSON.parse(stored).enabled : false;
+    });
+    const [diagnosticsEnabled, setDiagnosticsEnabled] = useState(() => isDiagnosticsEnabled());
+
     const transactions = getTransactions();
+
+    useEffect(() => {
+        areNotificationsEnabled().then(enabled => {
+            // Update state if needed
+        });
+    }, []);
+
+    const handleCurrencyChange = (e) => {
+        const newCurrency = e.target.value;
+        setCurrentCurrency(newCurrency);
+        setUserCurrency(newCurrency);
+        logEvent(EVENTS.CURRENCY_CHANGE, { currency: newCurrency });
+        onUpdate?.();
+    };
+
+    const handleRemindersToggle = async () => {
+        if (!remindersEnabled) {
+            const granted = await requestNotificationPermission();
+            if (granted) {
+                setRemindersEnabled(true);
+                localStorage.setItem('budgetwise-reminders', JSON.stringify({ enabled: true }));
+                await scheduleDailyReminder('20:00');
+                showToast('success', 'Reminders enabled! Daily notifications at 8 PM.');
+            } else {
+                showToast('error', 'Please enable notifications in your browser settings.');
+            }
+        } else {
+            setRemindersEnabled(false);
+            localStorage.setItem('budgetwise-reminders', JSON.stringify({ enabled: false }));
+            await cancelAllReminders();
+            showToast('success', 'Reminders disabled');
+        }
+    };
+
+    const handleDiagnosticsToggle = () => {
+        const newValue = !diagnosticsEnabled;
+        setDiagnosticsEnabled(newValue);
+        setDiagEnabled(newValue);
+        showToast('success', newValue ? 'Diagnostics enabled' : 'Diagnostics disabled');
+    };
+
+    const showToast = (type, message) => {
+        setImportStatus({ type, message });
+        setTimeout(() => setImportStatus(null), 3000);
+    };
 
     const handleExport = () => {
         if (transactions.length === 0) {
-            alert('No transactions to export');
+            showToast('error', 'No transactions to export');
             return;
         }
-
         const filename = `budgetwise_${new Date().toISOString().split('T')[0]}.csv`;
         downloadCSV(transactions, filename);
-        setImportStatus({ type: 'success', message: `Exported ${transactions.length} transactions` });
-        setTimeout(() => setImportStatus(null), 3000);
+        showToast('success', `Exported ${transactions.length} transactions`);
     };
 
     const handleFileSelect = (e) => {
         const file = e.target.files?.[0];
         if (!file) return;
-
-        // Store file and show import type modal
         setPendingFile(file);
         setShowImportType(true);
-
-        // Reset file input
-        if (fileInputRef.current) {
-            fileInputRef.current.value = '';
-        }
+        if (fileInputRef.current) fileInputRef.current.value = '';
     };
 
     const handleImport = async (importMode) => {
         setShowImportType(false);
         if (!pendingFile) return;
-
-        setImportStatus({ type: 'loading', message: 'Importing...' });
+        showToast('loading', 'Importing...');
 
         try {
             const text = await pendingFile.text();
             const importedTransactions = parseCSV(text, importMode);
-
-            // Apply AI categorization to imported transactions (skip credit_payment category)
             const categorizedTransactions = importedTransactions.map(t => {
                 if (t.category === 'other' && t.description) {
                     const suggestion = suggestCategory(t.description, t.amount, t.type);
-                    if (suggestion.confidence >= 0.5) {
-                        return { ...t, category: suggestion.category };
-                    }
+                    if (suggestion.confidence >= 0.5) return { ...t, category: suggestion.category };
                 }
                 return t;
             });
 
-            // Merge with existing transactions
             const existingTransactions = getTransactions();
             const allTransactions = [...categorizedTransactions, ...existingTransactions];
-
-            // Remove duplicates based on date + amount + description
             const seen = new Set();
             const uniqueTransactions = allTransactions.filter(t => {
                 const key = `${t.date}_${t.amount}_${t.description}`;
@@ -72,389 +112,238 @@ export default function Settings({ onUpdate, theme, onToggleTheme, onResetOnboar
                 seen.add(key);
                 return true;
             });
-
-            // Sort by date (newest first)
             uniqueTransactions.sort((a, b) => new Date(b.date) - new Date(a.date));
-
             saveTransactions(uniqueTransactions);
-
-            setImportStatus({
-                type: 'success',
-                message: `Successfully imported ${categorizedTransactions.length} transactions`
-            });
-
+            showToast('success', `Imported ${categorizedTransactions.length} transactions`);
             onUpdate?.();
         } catch (error) {
-            console.error('Import error:', error);
-            setImportStatus({
-                type: 'error',
-                message: `Import failed: ${error.message}`
-            });
+            showToast('error', `Import failed: ${error.message}`);
         }
-
         setPendingFile(null);
-        setTimeout(() => setImportStatus(null), 5000);
     };
 
     const handleClearData = () => {
         clearAllData();
         setShowClearConfirm(false);
         onUpdate?.();
-        setImportStatus({ type: 'success', message: 'All data cleared' });
-        setTimeout(() => setImportStatus(null), 3000);
-    };
-
-    const handleSettingChange = (key, value) => {
-        const newSettings = { ...settings, [key]: value };
-        setSettings(newSettings);
-        saveSettings(newSettings);
+        showToast('success', 'All data cleared');
     };
 
     return (
-        <div className="settings-page">
+        <div className="space-y-6 animate-in fade-in duration-500 max-w-4xl mx-auto">
             {/* Header */}
-            <div style={{ marginBottom: '1.5rem' }}>
-                <h2 style={{ fontSize: '1.5rem', fontWeight: '700', marginBottom: '0.5rem' }}>Settings</h2>
-                <p style={{ color: 'var(--text-secondary)' }}>
-                    Manage your data and preferences
-                </p>
+            <div className="mb-8">
+                <h1 className="text-2xl font-bold text-gray-900 dark:text-white mb-1">Settings</h1>
+                <p className="text-gray-500 dark:text-gray-400">Manage your preferences and data</p>
             </div>
 
-            {/* Import Status */}
+            {/* Toast Notification */}
             {importStatus && (
-                <div
-                    className="card"
-                    style={{
-                        marginBottom: '1rem',
-                        background: importStatus.type === 'success'
-                            ? 'rgba(16, 185, 129, 0.2)'
-                            : importStatus.type === 'error'
-                                ? 'rgba(239, 68, 68, 0.2)'
-                                : 'rgba(0, 217, 255, 0.2)',
-                        border: `1px solid ${importStatus.type === 'success'
-                            ? 'rgba(16, 185, 129, 0.5)'
-                            : importStatus.type === 'error'
-                                ? 'rgba(239, 68, 68, 0.5)'
-                                : 'rgba(0, 217, 255, 0.5)'
-                            }`
-                    }}
-                >
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                        <span>
-                            {importStatus.type === 'success' ? '✅' : importStatus.type === 'error' ? '❌' : '⏳'}
-                        </span>
-                        <span>{importStatus.message}</span>
-                    </div>
+                <div className={`fixed top-4 right-4 z-50 px-4 py-3 rounded-xl shadow-lg flex items-center gap-3 animate-in slide-in-from-top-2 duration-300 ${importStatus.type === 'success' ? 'bg-emerald-500 text-white' :
+                        importStatus.type === 'error' ? 'bg-red-500 text-white' : 'bg-blue-500 text-white'
+                    }`}>
+                    <span>{importStatus.type === 'success' ? '✓' : importStatus.type === 'error' ? '✕' : '⏳'}</span>
+                    <span className="text-sm font-medium">{importStatus.message}</span>
                 </div>
             )}
 
-            {/* Data Section */}
-            <div className="settings-section">
-                <div className="settings-title">Data Management</div>
+            {/* Main Grid - 2 columns on desktop */}
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
 
-                {/* Import */}
-                <div className="settings-item" onClick={() => fileInputRef.current?.click()}>
-                    <div className="settings-item-content">
-                        <div className="settings-item-icon">📥</div>
-                        <div>
-                            <div className="settings-item-label">Import CSV</div>
-                            <div className="settings-item-desc">Import transactions from your bank</div>
+                {/* Left Column */}
+                <div className="space-y-6">
+
+                    {/* Data Management */}
+                    <div className="settings-section-card">
+                        <h3 className="settings-section-title">Data Management</h3>
+
+                        <div className="settings-action" onClick={() => fileInputRef.current?.click()}>
+                            <div className="settings-action-content">
+                                <div className="settings-action-icon"><Upload size={20} /></div>
+                                <div className="settings-action-text">
+                                    <h4>Import CSV</h4>
+                                    <p>Import transactions from your bank</p>
+                                </div>
+                            </div>
+                            <ChevronRight size={18} className="settings-action-chevron" />
+                        </div>
+                        <input ref={fileInputRef} type="file" accept=".csv" className="hidden" onChange={handleFileSelect} />
+
+                        <div className="settings-action" onClick={handleExport}>
+                            <div className="settings-action-content">
+                                <div className="settings-action-icon"><Download size={20} /></div>
+                                <div className="settings-action-text">
+                                    <h4>Export CSV</h4>
+                                    <p>{transactions.length} transaction{transactions.length !== 1 ? 's' : ''} available</p>
+                                </div>
+                            </div>
+                            <ChevronRight size={18} className="settings-action-chevron" />
+                        </div>
+
+                        <div className="settings-action settings-action-danger" onClick={() => setShowClearConfirm(true)}>
+                            <div className="settings-action-content">
+                                <div className="settings-action-icon"><Trash2 size={20} /></div>
+                                <div className="settings-action-text">
+                                    <h4>Clear All Data</h4>
+                                    <p>Delete transactions and settings</p>
+                                </div>
+                            </div>
+                            <ChevronRight size={18} className="settings-action-chevron" />
                         </div>
                     </div>
-                    <span style={{ color: 'var(--text-muted)' }}>→</span>
-                </div>
-                <input
-                    ref={fileInputRef}
-                    type="file"
-                    accept=".csv"
-                    style={{ display: 'none' }}
-                    onChange={handleFileSelect}
-                />
 
-                {/* Export */}
-                <div className="settings-item" onClick={handleExport}>
-                    <div className="settings-item-content">
-                        <div className="settings-item-icon">📤</div>
-                        <div>
-                            <div className="settings-item-label">Export CSV</div>
-                            <div className="settings-item-desc">
-                                {transactions.length} transaction{transactions.length !== 1 ? 's' : ''}
+                    {/* Appearance */}
+                    <div className="settings-section-card">
+                        <h3 className="settings-section-title">Appearance</h3>
+
+                        <div className="settings-action">
+                            <div className="settings-action-content">
+                                <div className="settings-action-icon">{theme === 'dark' ? <Moon size={20} /> : <Sun size={20} />}</div>
+                                <div className="settings-action-text">
+                                    <h4>Theme</h4>
+                                    <p>Choose your preferred look</p>
+                                </div>
+                            </div>
+                            <div className="theme-picker">
+                                <button className={`theme-option ${theme === 'light' ? 'active' : ''}`} onClick={() => theme !== 'light' && onToggleTheme()}>Light</button>
+                                <button className={`theme-option ${theme === 'dark' ? 'active' : ''}`} onClick={() => theme !== 'dark' && onToggleTheme()}>Dark</button>
                             </div>
                         </div>
                     </div>
-                    <span style={{ color: 'var(--text-muted)' }}>→</span>
                 </div>
 
-                {/* Clear Data */}
-                <div
-                    className="settings-item"
-                    onClick={() => setShowClearConfirm(true)}
-                    style={{ borderColor: 'rgba(239, 68, 68, 0.3)' }}
-                >
-                    <div className="settings-item-content">
-                        <div className="settings-item-icon" style={{ background: 'rgba(239, 68, 68, 0.2)' }}>🗑️</div>
-                        <div>
-                            <div className="settings-item-label" style={{ color: 'var(--accent-danger)' }}>
-                                Clear All Data
+                {/* Right Column */}
+                <div className="space-y-6">
+
+                    {/* Preferences */}
+                    <div className="settings-section-card">
+                        <h3 className="settings-section-title">Preferences</h3>
+
+                        <div className="settings-action">
+                            <div className="settings-action-content">
+                                <div className="settings-action-icon">💱</div>
+                                <div className="settings-action-text">
+                                    <h4>Currency</h4>
+                                    <p>Display format for money</p>
+                                </div>
                             </div>
-                            <div className="settings-item-desc">Delete all transactions and settings</div>
+                            <select value={currentCurrency} onChange={handleCurrencyChange} className="select-premium">
+                                {SUPPORTED_CURRENCIES.map(c => (
+                                    <option key={c.code} value={c.code}>{c.symbol} {c.code}</option>
+                                ))}
+                            </select>
                         </div>
-                    </div>
-                    <span style={{ color: 'var(--text-muted)' }}>→</span>
-                </div>
-            </div>
 
-            {/* Appearance Section */}
-            <div className="settings-section">
-                <div className="settings-title">Appearance</div>
-
-                <div className="settings-item" onClick={onToggleTheme}>
-                    <div className="settings-item-content">
-                        <div className="settings-item-icon">
-                            {theme === 'dark' ? '🌙' : '☀️'}
-                        </div>
-                        <div>
-                            <div className="settings-item-label">Theme</div>
-                            <div className="settings-item-desc">
-                                {theme === 'dark' ? 'Dark mode' : 'Light mode'}
+                        <div className="settings-action" onClick={handleRemindersToggle}>
+                            <div className="settings-action-content">
+                                <div className="settings-action-icon"><Bell size={20} /></div>
+                                <div className="settings-action-text">
+                                    <h4>Daily Reminders</h4>
+                                    <p>Get notified at 8 PM to log expenses</p>
+                                </div>
                             </div>
+                            <div className={`toggle-premium ${remindersEnabled ? 'active' : ''}`} />
                         </div>
-                    </div>
-                    <div style={{
-                        display: 'flex',
-                        alignItems: 'center',
-                        gap: '0.5rem',
-                        background: 'rgba(255,255,255,0.1)',
-                        borderRadius: '20px',
-                        padding: '4px'
-                    }}>
-                        <span style={{
-                            padding: '6px 12px',
-                            borderRadius: '16px',
-                            fontSize: '0.8rem',
-                            background: theme === 'light' ? 'var(--accent-primary)' : 'transparent',
-                            color: theme === 'light' ? 'white' : 'var(--text-muted)'
-                        }}>Light</span>
-                        <span style={{
-                            padding: '6px 12px',
-                            borderRadius: '16px',
-                            fontSize: '0.8rem',
-                            background: theme === 'dark' ? 'var(--accent-primary)' : 'transparent',
-                            color: theme === 'dark' ? 'white' : 'var(--text-muted)'
-                        }}>Dark</span>
-                    </div>
-                </div>
-            </div>
 
-            {/* Preferences Section */}
-            <div className="settings-section">
-                <div className="settings-title">Preferences</div>
-
-                {/* Currencies */}
-                <div className="settings-item">
-                    <div className="settings-item-content">
-                        <div className="settings-item-icon">💱</div>
-                        <div>
-                            <div className="settings-item-label">Currencies</div>
-                            <div className="settings-item-desc">
-                                {JSON.parse(localStorage.getItem('budgetwise-currencies') || '["USD"]').join(', ')}
+                        <div className="settings-action" onClick={handleDiagnosticsToggle}>
+                            <div className="settings-action-content">
+                                <div className="settings-action-icon"><Wrench size={20} /></div>
+                                <div className="settings-action-text">
+                                    <h4>Diagnostics</h4>
+                                    <p>Store usage events locally</p>
+                                </div>
                             </div>
+                            <div className={`toggle-premium ${diagnosticsEnabled ? 'active' : ''}`} />
                         </div>
                     </div>
-                    <span style={{ color: 'var(--text-muted)', fontSize: '0.8rem' }}>Edit in onboarding</span>
-                </div>
 
-                {/* Reminders */}
-                <div className="settings-item" onClick={() => {
-                    const current = JSON.parse(localStorage.getItem('budgetwise-reminders') || '{"enabled":false}');
-                    const newVal = { ...current, enabled: !current.enabled };
-                    localStorage.setItem('budgetwise-reminders', JSON.stringify(newVal));
-                    onUpdate?.();
-                }}>
-                    <div className="settings-item-content">
-                        <div className="settings-item-icon">🔔</div>
-                        <div>
-                            <div className="settings-item-label">Reminders</div>
-                            <div className="settings-item-desc">Budget update notifications</div>
+                    {/* Help & Support */}
+                    <div className="settings-section-card">
+                        <h3 className="settings-section-title">Help & Support</h3>
+
+                        <div className="settings-action" onClick={onReopenTutorial}>
+                            <div className="settings-action-content">
+                                <div className="settings-action-icon"><BookOpen size={20} /></div>
+                                <div className="settings-action-text">
+                                    <h4>How It Works</h4>
+                                    <p>View the app tutorial again</p>
+                                </div>
+                            </div>
+                            <ChevronRight size={18} className="settings-action-chevron" />
+                        </div>
+
+                        <div className="settings-action" onClick={onResetOnboarding}>
+                            <div className="settings-action-content">
+                                <div className="settings-action-icon"><RotateCcw size={20} /></div>
+                                <div className="settings-action-text">
+                                    <h4>Redo Setup</h4>
+                                    <p>Go through onboarding again</p>
+                                </div>
+                            </div>
+                            <ChevronRight size={18} className="settings-action-chevron" />
                         </div>
                     </div>
-                    <div className={`toggle-switch ${JSON.parse(localStorage.getItem('budgetwise-reminders') || '{"enabled":false}').enabled ? 'active' : ''}`} />
-                </div>
 
-                {/* Analytics */}
-                <div className="settings-item" onClick={() => {
-                    const current = JSON.parse(localStorage.getItem('budgetwise-analytics') || '{"analyticsEnabled":true}');
-                    const newVal = { ...current, analyticsEnabled: !current.analyticsEnabled };
-                    localStorage.setItem('budgetwise-analytics', JSON.stringify(newVal));
-                    onUpdate?.();
-                }}>
-                    <div className="settings-item-content">
-                        <div className="settings-item-icon">📊</div>
-                        <div>
-                            <div className="settings-item-label">Usage Analytics</div>
-                            <div className="settings-item-desc">Help improve BudgetWise</div>
-                        </div>
-                    </div>
-                    <div className={`toggle-switch ${JSON.parse(localStorage.getItem('budgetwise-analytics') || '{"analyticsEnabled":true}').analyticsEnabled ? 'active' : ''}`} />
-                </div>
-
-                {/* Reopen Tutorial */}
-                <div className="settings-item" onClick={onReopenTutorial}>
-                    <div className="settings-item-content">
-                        <div className="settings-item-icon">📖</div>
-                        <div>
-                            <div className="settings-item-label">How It Works</div>
-                            <div className="settings-item-desc">View the app tutorial again</div>
-                        </div>
-                    </div>
-                    <span style={{ color: 'var(--text-muted)' }}>→</span>
-                </div>
-
-                {/* Reset Onboarding */}
-                <div className="settings-item" onClick={onResetOnboarding}>
-                    <div className="settings-item-content">
-                        <div className="settings-item-icon">🔄</div>
-                        <div>
-                            <div className="settings-item-label">Redo Setup</div>
-                            <div className="settings-item-desc">Go through onboarding again</div>
-                        </div>
-                    </div>
-                    <span style={{ color: 'var(--text-muted)' }}>→</span>
-                </div>
-            </div>
-
-            {/* CSV Format Help */}
-            <div className="settings-section">
-                <div className="settings-title">CSV Import Format</div>
-                <div className="card" style={{ fontSize: '0.85rem' }}>
-                    <p style={{ marginBottom: '0.75rem', color: 'var(--text-secondary)' }}>
-                        BudgetWise automatically detects common CSV formats from banks including:
-                    </p>
-                    <ul style={{ paddingLeft: '1.25rem', color: 'var(--text-secondary)', lineHeight: 1.8 }}>
-                        <li>Standard format: Date, Description, Amount</li>
-                        <li>Split columns: Date, Description, Debit, Credit</li>
-                        <li>Various date formats (MM/DD/YYYY, YYYY-MM-DD, etc.)</li>
-                    </ul>
-                    <p style={{ marginTop: '0.75rem', color: 'var(--accent-primary)' }}>
-                        💡 AI will automatically categorize your transactions after import!
-                    </p>
-                </div>
-            </div>
-
-            {/* App Info */}
-            <div className="settings-section">
-                <div className="settings-title">About</div>
-                <div className="card">
-                    <div style={{ textAlign: 'center' }}>
-                        <div style={{
-                            width: 60,
-                            height: 60,
-                            background: 'var(--gradient-primary)',
-                            borderRadius: 16,
-                            display: 'flex',
-                            alignItems: 'center',
-                            justifyContent: 'center',
-                            margin: '0 auto 1rem',
-                            fontSize: '1.75rem'
-                        }}>
-                            💰
-                        </div>
-                        <h3 style={{ fontSize: '1.25rem', fontWeight: '700', marginBottom: '0.25rem' }}>
-                            BudgetWise
-                        </h3>
-                        <p style={{ color: 'var(--text-secondary)', marginBottom: '1rem' }}>
-                            Smart Budget Tracker
-                        </p>
-                        <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>
-                            Version 1.0.0
-                        </p>
+                    {/* About */}
+                    <div className="settings-section-card about-card">
+                        <div className="about-logo">💰</div>
+                        <h3 className="about-name">BudgetWise</h3>
+                        <p className="about-tagline">Smart Budget Tracker</p>
+                        <p className="about-version">Version 2.0.0</p>
                     </div>
                 </div>
             </div>
 
-            {/* Install PWA reminder */}
-            <div className="card" style={{ marginTop: '1rem', textAlign: 'center' }}>
-                <div style={{ fontSize: '1.5rem', marginBottom: '0.5rem' }}>📱</div>
-                <p style={{ fontSize: '0.9rem', color: 'var(--text-secondary)' }}>
-                    Install BudgetWise on your home screen for the best experience!
-                </p>
-                <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginTop: '0.5rem' }}>
-                    Look for "Add to Home Screen" in your browser menu
-                </p>
+            {/* Install PWA Banner */}
+            <div className="settings-section-card flex items-center gap-4 p-4">
+                <div className="settings-action-icon flex-shrink-0"><Smartphone size={20} /></div>
+                <div className="flex-1">
+                    <h4 className="text-sm font-semibold text-gray-900 dark:text-white">Install BudgetWise</h4>
+                    <p className="text-xs text-gray-500">Add to home screen for the best experience</p>
+                </div>
+                <Info size={16} className="text-gray-400" />
             </div>
 
             {/* Clear Confirmation Modal */}
             {showClearConfirm && (
                 <div className="modal-overlay" onClick={() => setShowClearConfirm(false)}>
-                    <div className="modal" onClick={e => e.stopPropagation()}>
-                        <div className="modal-header">
-                            <h3 className="modal-title">Clear All Data?</h3>
-                            <button className="modal-close" onClick={() => setShowClearConfirm(false)}>×</button>
+                    <div className="bg-white dark:bg-gray-800 rounded-2xl w-full max-w-sm shadow-2xl overflow-hidden" onClick={e => e.stopPropagation()}>
+                        <div className="p-6 border-b border-gray-100 dark:border-gray-700">
+                            <h3 className="text-lg font-bold text-gray-900 dark:text-white">Clear All Data?</h3>
                         </div>
-                        <div className="modal-body">
-                            <p style={{ color: 'var(--text-secondary)' }}>
-                                This will permanently delete all your transactions, budgets, and settings.
-                                This action cannot be undone.
-                            </p>
+                        <div className="p-6">
+                            <p className="text-gray-600 dark:text-gray-400 text-sm">This will permanently delete all your transactions, budgets, and settings. This action cannot be undone.</p>
                         </div>
-                        <div className="modal-footer">
-                            <button
-                                className="btn btn-secondary"
-                                onClick={() => setShowClearConfirm(false)}
-                            >
-                                Cancel
-                            </button>
-                            <button
-                                className="btn btn-danger"
-                                onClick={handleClearData}
-                            >
-                                Delete Everything
-                            </button>
+                        <div className="p-4 bg-gray-50 dark:bg-gray-900/50 flex gap-3">
+                            <button className="flex-1 py-2.5 text-gray-600 font-medium" onClick={() => setShowClearConfirm(false)}>Cancel</button>
+                            <button className="flex-1 py-2.5 bg-red-500 text-white font-bold rounded-xl" onClick={handleClearData}>Delete Everything</button>
                         </div>
                     </div>
                 </div>
             )}
 
-            {/* Import Type Selection Modal */}
+            {/* Import Type Modal */}
             {showImportType && (
                 <div className="modal-overlay" onClick={() => { setShowImportType(false); setPendingFile(null); }}>
-                    <div className="modal" onClick={e => e.stopPropagation()}>
-                        <div className="modal-header">
-                            <h3 className="modal-title">What type of file is this?</h3>
-                            <button className="modal-close" onClick={() => { setShowImportType(false); setPendingFile(null); }}>×</button>
+                    <div className="bg-white dark:bg-gray-800 rounded-2xl w-full max-w-sm shadow-2xl overflow-hidden" onClick={e => e.stopPropagation()}>
+                        <div className="p-6 border-b border-gray-100 dark:border-gray-700">
+                            <h3 className="text-lg font-bold text-gray-900 dark:text-white">What type of file?</h3>
                         </div>
-                        <div className="modal-body">
-                            <p style={{ color: 'var(--text-secondary)', marginBottom: '1rem' }}>
-                                Select the type of statement you're importing:
-                            </p>
-                            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
-                                <button
-                                    className="btn btn-secondary"
-                                    style={{ justifyContent: 'flex-start', padding: '1rem' }}
-                                    onClick={() => handleImport('credit_card')}
-                                >
-                                    <span style={{ fontSize: '1.5rem', marginRight: '0.75rem' }}>💳</span>
-                                    <div style={{ textAlign: 'left' }}>
-                                        <div style={{ fontWeight: '600' }}>Credit Card Statement</div>
-                                        <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>
-                                            All transactions are expenses
-                                        </div>
-                                    </div>
-                                </button>
-                                <button
-                                    className="btn btn-secondary"
-                                    style={{ justifyContent: 'flex-start', padding: '1rem' }}
-                                    onClick={() => handleImport('bank')}
-                                >
-                                    <span style={{ fontSize: '1.5rem', marginRight: '0.75rem' }}>🏦</span>
-                                    <div style={{ textAlign: 'left' }}>
-                                        <div style={{ fontWeight: '600' }}>Bank Account Statement</div>
-                                        <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>
-                                            Includes income and expenses
-                                        </div>
-                                    </div>
-                                </button>
-                            </div>
+                        <div className="p-4 space-y-3">
+                            <button className="w-full p-4 bg-gray-50 dark:bg-gray-900 rounded-xl flex items-center gap-4 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors" onClick={() => handleImport('credit_card')}>
+                                <span className="text-2xl">💳</span>
+                                <div className="text-left">
+                                    <div className="font-semibold text-gray-900 dark:text-white">Credit Card</div>
+                                    <div className="text-xs text-gray-500">All transactions are expenses</div>
+                                </div>
+                            </button>
+                            <button className="w-full p-4 bg-gray-50 dark:bg-gray-900 rounded-xl flex items-center gap-4 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors" onClick={() => handleImport('bank')}>
+                                <span className="text-2xl">🏦</span>
+                                <div className="text-left">
+                                    <div className="font-semibold text-gray-900 dark:text-white">Bank Account</div>
+                                    <div className="text-xs text-gray-500">Includes income and expenses</div>
+                                </div>
+                            </button>
                         </div>
                     </div>
                 </div>

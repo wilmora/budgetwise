@@ -1,78 +1,123 @@
 import React, { useState } from 'react';
-import Welcome from './Welcome';
-import Reminders from './Reminders';
-import Analytics from './Analytics';
-import Tutorial from './Tutorial';
 
-const STEPS = {
-    WELCOME: 0,
-    REMINDERS: 1,
-    ANALYTICS: 2,
-    TUTORIAL: 3,
-    DONE: 4
-};
+const CURRENCIES = [
+    { code: 'USD', name: 'US Dollar', symbol: '$', flag: '🇺🇸' },
+    { code: 'CAD', name: 'Canadian Dollar', symbol: 'C$', flag: '🇨🇦' },
+    { code: 'EUR', name: 'Euro', symbol: '€', flag: '🇪🇺' },
+    { code: 'GBP', name: 'British Pound', symbol: '£', flag: '🇬🇧' },
+    { code: 'MXN', name: 'Mexican Peso', symbol: '$', flag: '🇲🇽' },
+    { code: 'JPY', name: 'Japanese Yen', symbol: '¥', flag: '🇯🇵' },
+];
+
+const REMINDER_OPTIONS = [
+    { id: 'none', label: 'No reminders' },
+    { id: 'daily', label: 'Daily' },
+    { id: 'weekly', label: 'Weekly' },
+    { id: 'monthly', label: 'Monthly' },
+];
 
 export default function Onboarding({ onComplete }) {
-    const [step, setStep] = useState(STEPS.WELCOME);
-    const [preferences, setPreferences] = useState({
-        currencies: ['USD'],
-        reminders: { enabled: false, frequency: null },
-        analytics: { analyticsEnabled: true }
-    });
+    const [selectedCurrency, setSelectedCurrency] = useState('USD');
+    const [reminderFrequency, setReminderFrequency] = useState('none');
+    const [analyticsEnabled, setAnalyticsEnabled] = useState(true);
 
-    const handleWelcomeNext = (currencies) => {
-        setPreferences(prev => ({ ...prev, currencies }));
-        setStep(STEPS.REMINDERS);
+    const handleComplete = () => {
+        onComplete({
+            currencies: [selectedCurrency],
+            reminders: {
+                enabled: reminderFrequency !== 'none',
+                frequency: reminderFrequency !== 'none' ? reminderFrequency : null
+            },
+            analytics: { analyticsEnabled }
+        });
     };
 
-    const handleRemindersNext = (reminders) => {
-        setPreferences(prev => ({ ...prev, reminders }));
-        setStep(STEPS.ANALYTICS);
-    };
+    return (
+        <div className="onboarding">
+            <div className="onboarding-content" style={{ justifyContent: 'flex-start', paddingTop: '2rem' }}>
+                {/* Logo & Welcome */}
+                <div className="onboarding-logo">💰</div>
 
-    const handleAnalyticsNext = (analytics) => {
-        setPreferences(prev => ({ ...prev, analytics }));
-        setStep(STEPS.TUTORIAL);
-    };
+                <h1 className="onboarding-title">Welcome to BudgetWise</h1>
+                <p className="onboarding-subtitle">
+                    Let's set up your preferences to get started
+                </p>
 
-    const handleTutorialComplete = () => {
-        // Save all preferences and complete onboarding
-        onComplete(preferences);
-    };
+                {/* Section 1: Currency Selection */}
+                <div className="setup-section">
+                    <h3 className="setup-section__title">
+                        <span className="setup-section__number">1</span>
+                        Select your currency
+                    </h3>
+                    <div className="currency-grid-compact">
+                        {CURRENCIES.map(currency => (
+                            <button
+                                key={currency.code}
+                                type="button"
+                                className={`currency-chip ${selectedCurrency === currency.code ? 'selected' : ''}`}
+                                onClick={() => setSelectedCurrency(currency.code)}
+                            >
+                                <span className="currency-chip__flag">{currency.flag}</span>
+                                <span className="currency-chip__code">{currency.code}</span>
+                            </button>
+                        ))}
+                    </div>
+                </div>
 
-    const handleBack = () => {
-        setStep(prev => Math.max(0, prev - 1));
-    };
+                {/* Section 2: Reminders */}
+                <div className="setup-section">
+                    <h3 className="setup-section__title">
+                        <span className="setup-section__number">2</span>
+                        Budget reminders
+                    </h3>
+                    <div className="reminder-pills">
+                        {REMINDER_OPTIONS.map(option => (
+                            <button
+                                key={option.id}
+                                type="button"
+                                className={`reminder-pill ${reminderFrequency === option.id ? 'selected' : ''}`}
+                                onClick={() => setReminderFrequency(option.id)}
+                            >
+                                {option.label}
+                            </button>
+                        ))}
+                    </div>
+                </div>
 
-    switch (step) {
-        case STEPS.WELCOME:
-            return (
-                <Welcome
-                    onNext={handleWelcomeNext}
-                    initialCurrencies={preferences.currencies}
-                />
-            );
+                {/* Section 3: Analytics */}
+                <div className="setup-section">
+                    <h3 className="setup-section__title">
+                        <span className="setup-section__number">3</span>
+                        Help improve BudgetWise
+                    </h3>
+                    <label className="analytics-toggle">
+                        <div className="analytics-toggle__content">
+                            <span className="analytics-toggle__text">
+                                Share anonymous usage data
+                            </span>
+                            <span className="analytics-toggle__hint">
+                                No financial data is ever collected
+                            </span>
+                        </div>
+                        <button
+                            type="button"
+                            className={`toggle-switch ${analyticsEnabled ? 'active' : ''}`}
+                            onClick={() => setAnalyticsEnabled(!analyticsEnabled)}
+                            aria-pressed={analyticsEnabled}
+                        />
+                    </label>
+                </div>
+            </div>
 
-        case STEPS.REMINDERS:
-            return (
-                <Reminders
-                    onNext={handleRemindersNext}
-                    onBack={handleBack}
-                />
-            );
-
-        case STEPS.ANALYTICS:
-            return (
-                <Analytics
-                    onNext={handleAnalyticsNext}
-                    onBack={handleBack}
-                />
-            );
-
-        case STEPS.TUTORIAL:
-            return <Tutorial onComplete={handleTutorialComplete} />;
-
-        default:
-            return null;
-    }
+            {/* Footer */}
+            <div className="onboarding-footer">
+                <button
+                    className="btn btn-primary btn-lg"
+                    onClick={handleComplete}
+                >
+                    Get Started
+                </button>
+            </div>
+        </div>
+    );
 }

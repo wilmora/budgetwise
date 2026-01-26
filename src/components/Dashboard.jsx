@@ -1,7 +1,10 @@
 import React, { useState, useMemo } from 'react';
-import { PieChart, Pie, Cell, ResponsiveContainer, AreaChart, Area, XAxis, YAxis, Tooltip } from 'recharts';
+import { PieChart, Pie, Cell, ResponsiveContainer, AreaChart, Area, XAxis, YAxis, Tooltip, CartesianGrid } from 'recharts';
+import { Wallet, TrendingUp, TrendingDown, PiggyBank, Calendar, ChevronRight } from 'lucide-react';
 import { getTransactions, getMonthlyTransactions, calculateTotals, getSpendingByCategory, getCategories } from '../utils/storage';
-import { generateInsights, predictMonthlySpending } from '../utils/aiCategorizer';
+import { predictMonthlySpending } from '../utils/aiCategorizer';
+import { formatCurrency } from '../utils/currency';
+import AIInsights from './AIInsights';
 
 export default function Dashboard() {
     const [period, setPeriod] = useState('all');
@@ -19,266 +22,327 @@ export default function Dashboard() {
 
     const totals = useMemo(() => calculateTotals(transactions), [transactions]);
     const categoryData = useMemo(() => getSpendingByCategory(transactions), [transactions]);
-    const insights = useMemo(() => generateInsights(transactions), [transactions]);
     const prediction = useMemo(() => predictMonthlySpending(getTransactions()), []);
+    const categories = getCategories();
 
     const balance = totals.income - totals.expense;
     const savingsRate = totals.income > 0 ? Math.round(((totals.income - totals.expense) / totals.income) * 100) : 0;
 
-    // Prepare chart data
-    const pieData = categoryData.slice(0, 6).map(cat => ({
+    // Chart Colors
+    const COLORS = ['#3b82f6', '#8b5cf6', '#10b981', '#f59e0b', '#ef4444', '#6366f1'];
+
+    const pieData = categoryData.slice(0, 6).map((cat, index) => ({
         name: cat.name,
         value: cat.amount,
-        color: cat.color
+        color: cat.color || COLORS[index % COLORS.length]
     }));
 
-    // Get daily spending for area chart
     const dailyData = useMemo(() => {
         const days = {};
+        for (let i = 13; i >= 0; i--) {
+            const d = new Date();
+            d.setDate(d.getDate() - i);
+            days[d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })] = 0;
+        }
+
         transactions.forEach(t => {
             if (t.type === 'expense') {
                 const date = new Date(t.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
-                days[date] = (days[date] || 0) + t.amount;
+                if (days[date] !== undefined) days[date] += t.amount;
             }
         });
-        return Object.entries(days)
-            .map(([date, amount]) => ({ date, amount }))
-            .slice(-14);
+        return Object.entries(days).map(([date, amount]) => ({ date, amount }));
     }, [transactions]);
 
     const recentTransactions = transactions.slice(0, 5);
-    const categories = getCategories();
 
-    const formatCurrency = (amount) => {
-        return new Intl.NumberFormat('en-US', {
-            style: 'currency',
-            currency: 'USD',
-            minimumFractionDigits: 0,
-            maximumFractionDigits: 0
-        }).format(amount);
+    const getTimeGreeting = () => {
+        const hour = new Date().getHours();
+        if (hour < 12) return 'Good morning';
+        if (hour < 18) return 'Good afternoon';
+        return 'Good evening';
+    };
+
+    const formatDate = () => {
+        return new Date().toLocaleDateString('en-US', {
+            weekday: 'long',
+            month: 'long',
+            day: 'numeric'
+        });
     };
 
     return (
-        <div className="dashboard">
-            {/* Period Selector */}
-            <div className="toggle-group">
-                <button
-                    className={`toggle-btn ${period === 'week' ? 'active' : ''}`}
-                    onClick={() => setPeriod('week')}
-                >
-                    Week
-                </button>
-                <button
-                    className={`toggle-btn ${period === 'month' ? 'active' : ''}`}
-                    onClick={() => setPeriod('month')}
-                >
-                    Month
-                </button>
-                <button
-                    className={`toggle-btn ${period === 'all' ? 'active' : ''}`}
-                    onClick={() => setPeriod('all')}
-                >
-                    All Time
-                </button>
+        <div className="dashboard page-enter">
+            {/* Header */}
+            <div className="dashboard-header animate-fade-up">
+                <div className="dashboard-greeting">
+                    <h1>{getTimeGreeting()}</h1>
+                    <p>Here's your financial overview</p>
+                </div>
+                <div className="dashboard-date">{formatDate()}</div>
             </div>
 
-            {/* Summary Cards */}
-            <div className="summary-grid">
-                <div className="card summary-card">
-                    <div className="summary-icon income">💰</div>
-                    <div className="summary-label">Income</div>
-                    <div className="summary-value positive">{formatCurrency(totals.income)}</div>
-                </div>
+            {/* Period Toggle */}
+            <div className="period-toggle animate-fade-up animate-stagger-1">
+                {['week', 'month', 'all'].map((p) => (
+                    <button
+                        key={p}
+                        onClick={() => setPeriod(p)}
+                        className={`period-toggle__btn ${period === p ? 'period-toggle__btn--active' : ''}`}
+                    >
+                        {p.charAt(0).toUpperCase() + p.slice(1)}
+                    </button>
+                ))}
+            </div>
 
-                <div className="card summary-card">
-                    <div className="summary-icon expense">💸</div>
-                    <div className="summary-label">Expenses</div>
-                    <div className="summary-value negative">{formatCurrency(totals.expense)}</div>
-                </div>
-
-                <div className="card summary-card">
-                    <div className="summary-icon balance">⚖️</div>
-                    <div className="summary-label">Balance</div>
-                    <div className={`summary-value ${balance >= 0 ? 'positive' : 'negative'}`}>
-                        {formatCurrency(balance)}
+            {/* Premium Summary Cards */}
+            <div className="summary-section">
+                <div className="summary-card summary-card--balance animate-fade-up animate-stagger-2">
+                    <div className="summary-card__icon">
+                        <Wallet size={20} />
                     </div>
+                    <div className="summary-card__label">Total Balance</div>
+                    <div className="summary-card__value animate-count">{formatCurrency(balance)}</div>
                 </div>
 
-                <div className="card summary-card">
-                    <div className="summary-icon savings">📊</div>
-                    <div className="summary-label">Savings Rate</div>
-                    <div className={`summary-value ${savingsRate >= 20 ? 'positive' : savingsRate >= 0 ? '' : 'negative'}`}>
-                        {savingsRate}%
+                <div className="summary-card summary-card--income animate-fade-up animate-stagger-3">
+                    <div className="summary-card__icon">
+                        <TrendingUp size={20} />
                     </div>
+                    <div className="summary-card__label">Income</div>
+                    <div className="summary-card__value animate-count">{formatCurrency(totals.income)}</div>
+                </div>
+
+                <div className="summary-card summary-card--expense animate-fade-up animate-stagger-4">
+                    <div className="summary-card__icon">
+                        <TrendingDown size={20} />
+                    </div>
+                    <div className="summary-card__label">Expenses</div>
+                    <div className="summary-card__value animate-count">{formatCurrency(totals.expense)}</div>
+                </div>
+
+                <div className="summary-card summary-card--savings animate-fade-up animate-stagger-5">
+                    <div className="summary-card__icon">
+                        <PiggyBank size={20} />
+                    </div>
+                    <div className="summary-card__label">Savings Rate</div>
+                    <div className="summary-card__value animate-count">{savingsRate}%</div>
                 </div>
             </div>
 
             {/* AI Insights */}
-            {insights.length > 0 && (
-                <div className="insights-section" style={{ marginBottom: '1.5rem' }}>
-                    {insights.slice(0, 2).map((insight, idx) => (
-                        <div key={idx} className="insight-card">
-                            <div className="insight-header">
-                                <span className="insight-icon">{insight.icon}</span>
-                                <span className="insight-title">{insight.title}</span>
-                            </div>
-                            <p className="insight-text">{insight.text}</p>
-                        </div>
-                    ))}
-                </div>
-            )}
-
-            {/* Charts Row */}
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '1rem', marginBottom: '1.5rem' }}>
-                {/* Spending by Category */}
-                {pieData.length > 0 && (
-                    <div className="card chart-card">
-                        <div className="card-header">
-                            <h3 className="card-title">Spending by Category</h3>
-                        </div>
-                        <div style={{ height: 200 }}>
-                            <ResponsiveContainer width="100%" height="100%">
-                                <PieChart>
-                                    <Pie
-                                        data={pieData}
-                                        cx="50%"
-                                        cy="50%"
-                                        innerRadius={50}
-                                        outerRadius={80}
-                                        paddingAngle={3}
-                                        dataKey="value"
-                                    >
-                                        {pieData.map((entry, index) => (
-                                            <Cell key={`cell-${index}`} fill={entry.color} />
-                                        ))}
-                                    </Pie>
-                                    <Tooltip
-                                        formatter={(value) => formatCurrency(value)}
-                                        contentStyle={{
-                                            background: '#1a1a2e',
-                                            border: '1px solid rgba(255,255,255,0.1)',
-                                            borderRadius: '8px'
-                                        }}
-                                    />
-                                </PieChart>
-                            </ResponsiveContainer>
-                        </div>
-                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem', marginTop: '0.5rem' }}>
-                            {pieData.map((cat, idx) => (
-                                <span key={idx} className="category-badge" style={{ borderLeft: `3px solid ${cat.color}` }}>
-                                    {cat.name}
-                                </span>
-                            ))}
-                        </div>
-                    </div>
-                )}
-
-                {/* Spending Trend */}
-                {dailyData.length > 1 && (
-                    <div className="card chart-card">
-                        <div className="card-header">
-                            <h3 className="card-title">Daily Spending Trend</h3>
-                        </div>
-                        <div style={{ height: 200 }}>
-                            <ResponsiveContainer width="100%" height="100%">
-                                <AreaChart data={dailyData}>
-                                    <defs>
-                                        <linearGradient id="colorSpending" x1="0" y1="0" x2="0" y2="1">
-                                            <stop offset="5%" stopColor="#00d9ff" stopOpacity={0.3} />
-                                            <stop offset="95%" stopColor="#00d9ff" stopOpacity={0} />
-                                        </linearGradient>
-                                    </defs>
-                                    <XAxis
-                                        dataKey="date"
-                                        stroke="#6b6b7b"
-                                        fontSize={12}
-                                        tickLine={false}
-                                    />
-                                    <YAxis
-                                        stroke="#6b6b7b"
-                                        fontSize={12}
-                                        tickLine={false}
-                                        tickFormatter={(v) => `$${v}`}
-                                    />
-                                    <Tooltip
-                                        formatter={(value) => formatCurrency(value)}
-                                        contentStyle={{
-                                            background: '#1a1a2e',
-                                            border: '1px solid rgba(255,255,255,0.1)',
-                                            borderRadius: '8px'
-                                        }}
-                                    />
-                                    <Area
-                                        type="monotone"
-                                        dataKey="amount"
-                                        stroke="#00d9ff"
-                                        fillOpacity={1}
-                                        fill="url(#colorSpending)"
-                                    />
-                                </AreaChart>
-                            </ResponsiveContainer>
-                        </div>
-                    </div>
-                )}
+            <div className="animate-fade-up animate-stagger-6">
+                <AIInsights />
             </div>
 
-            {/* Monthly Projection */}
-            {period === 'month' && prediction.currentSpending > 0 && (
-                <div className="card" style={{ marginBottom: '1.5rem' }}>
-                    <div className="card-header">
-                        <h3 className="card-title">📈 Monthly Projection</h3>
+            {/* Charts Section */}
+            <div className="charts-section">
+                {/* Spending Trend Chart */}
+                <div className="chart-card animate-fade-up animate-stagger-7">
+                    <div className="chart-card__header">
+                        <div>
+                            <h3 className="chart-card__title">Spending Trend</h3>
+                            <p className="chart-card__subtitle">Last 14 days</p>
+                        </div>
                     </div>
-                    <p style={{ color: 'var(--text-secondary)', fontSize: '0.9rem', marginBottom: '1rem' }}>
-                        Based on your daily average of <strong style={{ color: 'var(--accent-primary)' }}>{formatCurrency(prediction.dailyAverage)}</strong>,
-                        you're projected to spend <strong style={{ color: 'var(--accent-danger)' }}>{formatCurrency(prediction.projectedSpending)}</strong> this month.
-                    </p>
-                    <p style={{ color: 'var(--text-muted)', fontSize: '0.85rem' }}>
-                        {prediction.daysLeft} days remaining in the month
-                    </p>
+                    <div className="chart-container">
+                        <ResponsiveContainer width="100%" height="100%">
+                            <AreaChart data={dailyData}>
+                                <defs>
+                                    <linearGradient id="colorSpending" x1="0" y1="0" x2="0" y2="1">
+                                        <stop offset="5%" stopColor="#3b82f6" stopOpacity={0.3} />
+                                        <stop offset="95%" stopColor="#3b82f6" stopOpacity={0} />
+                                    </linearGradient>
+                                </defs>
+                                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#E5E7EB" opacity={0.5} />
+                                <XAxis
+                                    dataKey="date"
+                                    axisLine={false}
+                                    tickLine={false}
+                                    tick={{ fill: '#9CA3AF', fontSize: 11 }}
+                                    dy={10}
+                                    interval="preserveStartEnd"
+                                />
+                                <YAxis
+                                    axisLine={false}
+                                    tickLine={false}
+                                    tick={{ fill: '#9CA3AF', fontSize: 11 }}
+                                    tickFormatter={(v) => `$${v}`}
+                                    width={50}
+                                />
+                                <Tooltip
+                                    contentStyle={{
+                                        backgroundColor: 'rgba(255, 255, 255, 0.95)',
+                                        borderRadius: '12px',
+                                        border: 'none',
+                                        boxShadow: '0 4px 20px rgba(0, 0, 0, 0.15)',
+                                        padding: '12px'
+                                    }}
+                                    formatter={(value) => [formatCurrency(value), 'Spent']}
+                                />
+                                <Area
+                                    type="monotone"
+                                    dataKey="amount"
+                                    stroke="#3b82f6"
+                                    strokeWidth={3}
+                                    fillOpacity={1}
+                                    fill="url(#colorSpending)"
+                                />
+                            </AreaChart>
+                        </ResponsiveContainer>
+                    </div>
+                </div>
+
+                {/* Spending Breakdown Pie Chart */}
+                <div className="chart-card animate-fade-up animate-stagger-8">
+                    <div className="chart-card__header">
+                        <div>
+                            <h3 className="chart-card__title">Spending Breakdown</h3>
+                            <p className="chart-card__subtitle">By category</p>
+                        </div>
+                    </div>
+                    {pieData.length > 0 ? (
+                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 'var(--space-4)', alignItems: 'center' }}>
+                            <div className="chart-container" style={{ height: '180px' }}>
+                                <ResponsiveContainer width="100%" height="100%">
+                                    <PieChart>
+                                        <Pie
+                                            data={pieData}
+                                            cx="50%"
+                                            cy="50%"
+                                            innerRadius={50}
+                                            outerRadius={70}
+                                            paddingAngle={4}
+                                            dataKey="value"
+                                        >
+                                            {pieData.map((entry, index) => (
+                                                <Cell key={`cell-${index}`} fill={entry.color} strokeWidth={0} />
+                                            ))}
+                                        </Pie>
+                                        <Tooltip
+                                            contentStyle={{
+                                                backgroundColor: 'rgba(255, 255, 255, 0.95)',
+                                                borderRadius: '12px',
+                                                border: 'none',
+                                                boxShadow: '0 4px 20px rgba(0, 0, 0, 0.15)'
+                                            }}
+                                            formatter={(value) => formatCurrency(value)}
+                                        />
+                                    </PieChart>
+                                </ResponsiveContainer>
+                            </div>
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-2)' }}>
+                                {pieData.slice(0, 5).map((cat, idx) => (
+                                    <div
+                                        key={idx}
+                                        style={{
+                                            display: 'flex',
+                                            alignItems: 'center',
+                                            justifyContent: 'space-between',
+                                            fontSize: 'var(--text-xs)'
+                                        }}
+                                    >
+                                        <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)' }}>
+                                            <div
+                                                style={{
+                                                    width: '10px',
+                                                    height: '10px',
+                                                    borderRadius: '50%',
+                                                    backgroundColor: cat.color
+                                                }}
+                                            />
+                                            <span style={{ color: 'var(--text-secondary)' }}>{cat.name}</span>
+                                        </div>
+                                        <span style={{ fontWeight: 'var(--font-semibold)', color: 'var(--text-primary)' }}>
+                                            {formatCurrency(cat.value)}
+                                        </span>
+                                    </div>
+                                ))}
+                            </div>
+                        </div>
+                    ) : (
+                        <div className="empty-state">
+                            <div className="empty-state__icon">📊</div>
+                            <p className="empty-state__title">No spending data</p>
+                            <p className="empty-state__text">Add some transactions to see your breakdown</p>
+                        </div>
+                    )}
+                </div>
+            </div>
+
+            {/* Monthly Projection (only show in month view) */}
+            {period === 'month' && prediction.currentSpending > 0 && (
+                <div className="insights-card animate-fade-up">
+                    <div className="insights-card__header">
+                        <span className="insights-card__badge">
+                            <Calendar size={12} />
+                            Forecast
+                        </span>
+                    </div>
+                    <h3 className="insights-card__title">End of Month Projection</h3>
+                    <div className="insights-list">
+                        <div className="insight-item">
+                            <div className="insight-item__icon">📈</div>
+                            <div className="insight-item__text">
+                                <strong>Projected spending:</strong> {formatCurrency(prediction.projectedSpending)}
+                                <br />
+                                <span style={{ opacity: 0.8 }}>
+                                    Daily average: {formatCurrency(prediction.dailyAverage)} • {prediction.daysLeft} days left
+                                </span>
+                            </div>
+                        </div>
+                    </div>
                 </div>
             )}
 
             {/* Recent Transactions */}
-            <div className="card">
-                <div className="card-header">
-                    <h3 className="card-title">Recent Transactions</h3>
+            <div className="recent-transactions animate-fade-up">
+                <div className="recent-transactions__header">
+                    <h3 className="recent-transactions__title">Recent Activity</h3>
+                    <a href="#" className="recent-transactions__link">
+                        View All <ChevronRight size={14} />
+                    </a>
                 </div>
-
-                {recentTransactions.length > 0 ? (
-                    <div className="transactions-list">
-                        {recentTransactions.map(transaction => {
+                <ul className="transaction-list">
+                    {recentTransactions.length > 0 ? (
+                        recentTransactions.map((transaction, index) => {
                             const category = categories.find(c => c.id === transaction.category);
                             return (
-                                <div key={transaction.id} className="transaction-item">
-                                    <div
-                                        className="transaction-icon"
-                                        style={{ background: `${category?.color || '#6b7280'}20`, color: category?.color || '#6b7280' }}
-                                    >
-                                        {category?.emoji || '📦'}
-                                    </div>
-                                    <div className="transaction-details">
-                                        <div className="transaction-name">{transaction.description || 'Unnamed'}</div>
-                                        <div className="transaction-category">{category?.name || transaction.category}</div>
-                                    </div>
-                                    <div>
-                                        <div className={`transaction-amount ${transaction.type}`}>
-                                            {transaction.type === 'income' ? '+' : '-'}{formatCurrency(transaction.amount)}
+                                <li
+                                    key={transaction.id}
+                                    className="transaction-item animate-slide-right"
+                                    style={{ animationDelay: `${index * 0.05}s` }}
+                                >
+                                    <div className="transaction-item__left">
+                                        <div className="transaction-item__icon">
+                                            {category?.emoji || '📦'}
                                         </div>
-                                        <div className="transaction-date">
-                                            {new Date(transaction.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
+                                        <div className="transaction-item__details">
+                                            <span className="transaction-item__name">
+                                                {transaction.description || 'Unnamed'}
+                                            </span>
+                                            <span className="transaction-item__category">
+                                                {new Date(transaction.date).toLocaleDateString('en-US', {
+                                                    month: 'short',
+                                                    day: 'numeric'
+                                                })}
+                                            </span>
                                         </div>
                                     </div>
-                                </div>
+                                    <span className={`transaction-item__amount transaction-item__amount--${transaction.type}`}>
+                                        {transaction.type === 'income' ? '+' : '-'}{formatCurrency(transaction.amount)}
+                                    </span>
+                                </li>
                             );
-                        })}
-                    </div>
-                ) : (
-                    <div className="empty-state">
-                        <div className="empty-icon">📝</div>
-                        <div className="empty-title">No transactions yet</div>
-                        <p className="empty-text">Add your first transaction to start tracking your budget</p>
-                    </div>
-                )}
+                        })
+                    ) : (
+                        <div className="empty-state">
+                            <div className="empty-state__icon">💸</div>
+                            <p className="empty-state__title">No transactions yet</p>
+                            <p className="empty-state__text">Tap the + button to add your first transaction</p>
+                        </div>
+                    )}
+                </ul>
             </div>
         </div>
     );

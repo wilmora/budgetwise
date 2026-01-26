@@ -1,0 +1,53 @@
+/* ============================================
+   BUDGETWISE - RESPONSIVE STYLES v2.0
+   ============================================ */
+
+/* Mobile First - Base styles are already mobile-optimized in components.css and layout.css */
+/* This file handles overrides and specific breakpoint adjustments */
+
+/* Tablet (Portrait) and up */
+@media (min-width: 640px) {
+    :root {
+        --text-base: 1rem;
+    }
+}
+
+/* Tablet (Landscape) / Small Laptop */
+@media (min-width: 768px) {
+    .hide-on-desktop {
+        display: none !important;
+    }
+
+    .show-on-desktop {
+        display: block !important;
+    }
+}
+
+/* Desktop */
+@media (min-width: 1024px) {
+    :root {
+        --max-content-width: 1280px;
+    }
+
+    /* Layout adjustments */
+    .grid-2-cols {
+        grid-template-columns: repeat(2, 1fr);
+    }
+
+    .grid-3-cols {
+        grid-template-columns: repeat(3, 1fr);
+    }
+
+    .grid-4-cols {
+        grid-template-columns: repeat(4, 1fr);
+    }
+}
+
+/* Large Desktop */
+@media (min-width: 1280px) {
+
+    /* Enhanced spaciousness for large screens */
+    :root {
+        --space-4: 1.25rem;
+    }
+}

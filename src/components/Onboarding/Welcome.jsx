@@ -30,12 +30,7 @@ export default function Welcome({ onNext, initialCurrencies = ['USD'] }) {
         <div className="onboarding">
             <div className="onboarding-content">
                 <div style={{ textAlign: 'center', marginBottom: '2rem' }}>
-                    <div className="logo-icon" style={{
-                        width: 80,
-                        height: 80,
-                        fontSize: '2.5rem',
-                        margin: '0 auto 1.5rem'
-                    }}>
+                    <div className="onboarding-logo">
                         💰
                     </div>
                 </div>
